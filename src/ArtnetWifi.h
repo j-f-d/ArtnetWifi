@@ -44,17 +44,12 @@ THE SOFTWARE.
 #error "Architecture not supported!"
 #endif
 #include <WiFiUdp.h>
+#include "DMX-Workshop/Art-Net.h"
 
-// UDP specific
-#define ART_NET_PORT 6454
-// Opcodes
-#define ART_POLL 0x2000
-#define ART_DMX 0x5000
 // Buffers
-#define MAX_BUFFER_ARTNET 530
+#define MAX_BUFFER_ARTNET (sizeof(T_ArtDmx))
 // Packet
 #define ART_NET_ID "Art-Net"
-#define ART_DMX_START 18
 
 #define DMX_FUNC_PARAM uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* data
 typedef std::function <void (DMX_FUNC_PARAM)> StdFuncDmx_t;
@@ -74,9 +69,9 @@ public:
   void printPacketContent(void);
 
   // Return a pointer to the start of the DMX data
-  inline uint8_t* getDmxFrame(void)
+  inline uchar* getDmxFrame(void)
   {
-    return artnetPacket + ART_DMX_START;
+    return artnetPacket.Dmx.Data;
   }
 
   inline uint16_t getOpcode(void)
@@ -119,7 +114,7 @@ public:
   {
     dmxDataLength = len;
   }
-
+  
   inline void setArtDmxCallback(void (*fptr)(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* data))
   {
     artDmxCallback = fptr;
@@ -131,11 +126,16 @@ public:
   }
 
 private:
-  uint16_t makePacket(void);
+  uint16_t makeDmx(void);
 
   WiFiUDP Udp;
   String host;
-  uint8_t artnetPacket[MAX_BUFFER_ARTNET];
+  union U_artnetPacket{
+    char raw[MAX_BUFFER_ARTNET];
+    T_ArtPoll       Poll;
+    T_ArtPollReply  PollReply;
+    T_ArtDmx        Dmx;
+  } artnetPacket;
   uint16_t packetSize;
   uint16_t opcode;
   uint8_t sequence;

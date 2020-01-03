@@ -27,14 +27,13 @@ THE SOFTWARE.
 
 #include <ArtnetWifi.h>
 
-
 const char ArtnetWifi::artnetId[] = ART_NET_ID;
 
 ArtnetWifi::ArtnetWifi() {}
 
 void ArtnetWifi::begin(String hostname)
 {
-  Udp.begin(ART_NET_PORT);
+  Udp.begin(DefaultPortArt);
   host = hostname;
   sequence = 1;
   physical = 0;
@@ -46,60 +45,56 @@ uint16_t ArtnetWifi::read(void)
 
   if (packetSize <= MAX_BUFFER_ARTNET && packetSize > 0)
   {
-      Udp.read(artnetPacket, MAX_BUFFER_ARTNET);
+      Udp.read(artnetPacket.raw, packetSize);
 
       // Check that packetID is "Art-Net" else ignore
-      if (memcmp(artnetPacket, artnetId, sizeof(artnetId)) != 0) {
+      if (memcmp(artnetPacket.raw, artnetId, sizeof(artnetId)) != 0) {
         return 0;
       }
 
-      opcode = artnetPacket[8] | artnetPacket[9] << 8;
+      opcode = artnetPacket.raw[8] | artnetPacket.raw[9] << 8;
 
-      if (opcode == ART_DMX)
+      if (opcode == OpDmx)
       {
-        sequence = artnetPacket[12];
-        incomingUniverse = artnetPacket[14] | artnetPacket[15] << 8;
-        dmxDataLength = artnetPacket[17] | artnetPacket[16] << 8;
+        sequence = artnetPacket.Dmx.Sequence;
+        incomingUniverse = (artnetPacket.Dmx.Net << 8) | artnetPacket.Dmx.SubUni;
+        dmxDataLength = ntohs(artnetPacket.Dmx.Length);
 
-        if (artDmxCallback) (*artDmxCallback)(incomingUniverse, dmxDataLength, sequence, artnetPacket + ART_DMX_START);
+        if (artDmxCallback) (*artDmxCallback)(incomingUniverse, dmxDataLength,
+          sequence, artnetPacket.Dmx.Data);
         if (artDmxFunc) {
-          artDmxFunc(incomingUniverse, dmxDataLength, sequence, artnetPacket + ART_DMX_START);
+          artDmxFunc(incomingUniverse, dmxDataLength, sequence, artnetPacket.Dmx.Data);
         }
-        return ART_DMX;
+        return opcode;
       }
-      if (opcode == ART_POLL)
+      if (opcode == OpPoll)
       {
-        return ART_POLL;
+        return opcode;
       }
   }
 
   return 0;
 }
 
-uint16_t ArtnetWifi::makePacket(void)
+uint16_t ArtnetWifi::makeDmx(void)
 {
   uint16_t len;
-  uint16_t version;
 
-  memcpy(artnetPacket, artnetId, sizeof(artnetId));
-  opcode = ART_DMX;
-  artnetPacket[8] = opcode;
-  artnetPacket[9] = opcode >> 8;
-  version = 14;
-  artnetPacket[11] = version;
-  artnetPacket[10] = version >> 8;
-  artnetPacket[12] = sequence;
+  memcpy(artnetPacket.Dmx.ID, artnetId, sizeof(artnetId));
+  artnetPacket.Dmx.OpCode = htons(OpDmx);
+  artnetPacket.Dmx.ProtVerLo = ProtocolVersion;
+  artnetPacket.Dmx.ProtVerHi = ProtocolVersion >> 8;
+  artnetPacket.Dmx.Sequence = sequence;
   sequence++;
   if (!sequence) {
     sequence = 1;
   }
-  artnetPacket[13] = physical;
-  artnetPacket[14] = outgoingUniverse;
-  artnetPacket[15] = outgoingUniverse >> 8;
+  artnetPacket.Dmx.Physical = physical;
+  artnetPacket.Dmx.SubUni = outgoingUniverse;
+  artnetPacket.Dmx.Net = outgoingUniverse >> 8;
   len = dmxDataLength + (dmxDataLength % 2); // make a even number
-  artnetPacket[17] = len;
-  artnetPacket[16] = len >> 8;
-
+  artnetPacket.Dmx.Length = htons(len);
+  
   return len;
 }
 
@@ -107,9 +102,9 @@ int ArtnetWifi::write(void)
 {
   uint16_t len;
 
-  len = makePacket();
-  Udp.beginPacket(host.c_str(), ART_NET_PORT);
-  Udp.write(artnetPacket, ART_DMX_START + len);
+  len = makeDmx();
+  Udp.beginPacket(host.c_str(), DefaultPortArt);
+  Udp.write((const uint8_t*)artnetPacket.raw, offsetof(T_ArtDmx, Data) + len);
 
   return Udp.endPacket();
 }
@@ -118,9 +113,9 @@ int ArtnetWifi::write(IPAddress ip)
 {
   uint16_t len;
 
-  len = makePacket();
-  Udp.beginPacket(ip, ART_NET_PORT);
-  Udp.write(artnetPacket, ART_DMX_START + len);
+  len = makeDmx();
+  Udp.beginPacket(ip, DefaultPortArt);
+  Udp.write((const uint8_t*)artnetPacket.raw, offsetof(T_ArtDmx, Data) + len);
 
   return Udp.endPacket();
 }
@@ -130,7 +125,7 @@ void ArtnetWifi::setByte(uint16_t pos, uint8_t value)
   if (pos > 512) {
     return;
   }
-  artnetPacket[ART_DMX_START + pos] = value;
+  artnetPacket.Dmx.Data[offsetof(T_ArtDmx, Data) + pos] = value;
 }
 
 void ArtnetWifi::printPacketHeader(void)
@@ -149,8 +144,8 @@ void ArtnetWifi::printPacketHeader(void)
 
 void ArtnetWifi::printPacketContent(void)
 {
-  for (uint16_t i = ART_DMX_START ; i < dmxDataLength ; i++){
-    Serial.print(artnetPacket[i], DEC);
+  for (uint16_t i = offsetof(T_ArtDmx, Data) ; i < dmxDataLength ; i++){
+    Serial.print(artnetPacket.Dmx.Data[i], DEC);
     Serial.print("  ");
   }
   Serial.println('\n');
